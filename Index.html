@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mexicano Padel Tracker</title>
+  <style>
+    :root { --bg:#0b1020; --card:#121a33; --muted:#9fb0ff; --text:#eef2ff; --line:#25305a; --good:#38d9a9; --warn:#ffd43b; --bad:#ff6b6b; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: linear-gradient(180deg,#070a14, var(--bg)); color:var(--text); }
+    header { padding:20px 18px; border-bottom:1px solid var(--line); position: sticky; top:0; background: rgba(7,10,20,.85); backdrop-filter: blur(8px); }
+    header h1 { margin:0; font-size:18px; letter-spacing:.2px; }
+    header .sub { margin-top:6px; color:var(--muted); font-size:13px; }
+    main { padding:18px; max-width: 1150px; margin: 0 auto; }
+    .grid { display:grid; grid-template-columns: 1.2fr .8fr; gap:14px; }
+    @media (max-width: 980px){ .grid{ grid-template-columns:1fr; } }
+    .card { background: rgba(18,26,51,.9); border:1px solid var(--line); border-radius:14px; padding:14px; }
+    .card h2 { margin:0 0 10px; font-size:14px; color: #dfe6ff; }
+    .row { display:flex; gap:10px; flex-wrap: wrap; align-items: center; }
+    input, select, button, textarea {
+      background: #0c1226; border:1px solid var(--line); color:var(--text);
+      border-radius: 10px; padding:10px 10px; font-size:13px;
+    }
+    textarea { width:100%; min-height:92px; resize: vertical; }
+    button { cursor:pointer; }
+    button.primary { background:#1a2a63; }
+    button.ghost { background: transparent; }
+    .pill { display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid var(--line); color:#cfe0ff; font-size:12px; }
+    .muted { color: var(--muted); font-size: 12px; }
+    table { width:100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding:10px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align: top; }
+    th { color:#cfe0ff; font-weight:600; }
+    .right { text-align:right; }
+    .ok { color: var(--good); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    details summary { cursor:pointer; color:#cfe0ff; }
+    .split { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    @media (max-width: 700px){ .split{ grid-template-columns: 1fr; } }
+  </style>
+</head>
+
+<body>
+<header>
+  <h1>Mexicano Padel Tracker</h1>
+  <div class="sub">Tiers • Round 1 pairing (balanced) • Weekly tracker (DNP-aware) • Local-only storage</div>
+</header>
+
+<main>
+  <div class="grid">
+    <!-- LEFT -->
+    <div class="card">
+      <h2>Tier groups (source of truth)</h2>
+      <div class="muted">Edit players/tiers below. Default tiers are preloaded exactly as you specified.</div>
+      <div id="tiersView" style="margin-top:12px;"></div>
+
+      <details style="margin-top:12px;">
+        <summary>Manage players</summary>
+        <div class="split" style="margin-top:10px;">
+          <div>
+            <div class="muted">Add / move player</div>
+            <div class="row" style="margin-top:8px;">
+              <input id="playerName" placeholder="Player name (e.g., Florian)" />
+              <select id="tierSelect">
+                <option value="Tier 1">Tier 1 (Top)</option>
+                <option value="Tier 2A">Tier 2A (High Tier 2)</option>
+                <option value="Tier 2B">Tier 2B (Low Tier 2)</option>
+                <option value="Tier 3">Tier 3 (Developing)</option>
+              </select>
+              <button class="primary" id="addPlayerBtn">Add / Move</button>
+            </div>
+            <div class="muted" style="margin-top:8px;">Rules: If a player is not on the list, this page will ask what tier to assign.</div>
+          </div>
+          <div>
+            <div class="muted">Danger zone</div>
+            <div class="row" style="margin-top:8px;">
+              <button class="ghost" id="resetBtn">Reset to defaults</button>
+              <button class="ghost" id="wipeBtn">Wipe all local data</button>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <hr style="border:0;border-top:1px solid var(--line);margin:14px 0;">
+
+      <h2>Round 1 pairing generator (balanced start)</h2>
+      <div class="muted">Uses tiers + optional “strength within tier” ordering you set manually. Produces 4-person courts (two teams).</div>
+
+      <div class="row" style="margin-top:10px;">
+        <input id="participants" style="flex:1; min-width:260px;" placeholder="Participants (comma-separated). Leave blank = everyone." />
+        <button class="primary" id="genPairBtn">Generate Pairings</button>
+      </div>
+
+      <div id="pairingOut" style="margin-top:12px;"></div>
+
+      <details style="margin-top:10px;">
+        <summary>Pairing logic (what it does)</summary>
+        <div class="muted" style="margin-top:8px;">
+          <ul>
+            <li>Assigns each player a tier weight (Tier 1 strongest → Tier 3 weakest).</li>
+            <li>Tries to build courts of 4 where total “strength” is similar across courts.</li>
+            <li>Within each court, pairs strongest with weakest vs middle vs middle (basic balancing).</li>
+          </ul>
+          This is a practical heuristic (fast + good enough). If you want the “perfect” solution, we can upgrade it to an optimizer.
+        </div>
+      </details>
+    </div>
+
+    <!-- RIGHT -->
+    <div class="card">
+      <h2>Weekly tracker</h2>
+      <div class="muted">
+        DNP rules applied:
+        <ul>
+          <li>If a player doesn’t play in a week → mark <span class="pill mono">DNP</span></li>
+          <li>No P score assigned for DNP (not treated as 0)</li>
+          <li>DNP weeks don’t trigger promotion/relegation</li>
+          <li>Tier movement requires a week with ≥ 3 rounds played (you can record rounds played)</li>
+        </ul>
+      </div>
+
+      <div style="margin-top:10px;">
+        <div class="muted">Add / update week</div>
+        <div class="row" style="margin-top:8px;">
+          <input id="weekKey" placeholder="Week label (e.g., 2026-02-02)" />
+          <input id="roundsPlayed" type="number" min="0" placeholder="Rounds played (≥3 matters)" />
+        </div>
+        <div class="muted" style="margin-top:8px;">Paste results as lines: <span class="mono">Name, Pscore</span> or <span class="mono">Name, DNP</span></div>
+        <textarea id="weekResults" placeholder="KP, 0.62&#10;Amit, 0.58&#10;Florian, DNP"></textarea>
+        <div class="row">
+          <button class="primary" id="saveWeekBtn">Save week</button>
+          <button class="ghost" id="latestWeekBtn">Show latest week</button>
+        </div>
+      </div>
+
+      <div id="weeklyOut" style="margin-top:12px;"></div>
+
+      <details style="margin-top:10px;">
+        <summary>Note about P score</summary>
+        <div class="muted" style="margin-top:8px;">
+          This MVP assumes you enter P directly. If you want, we can wire in your exact “P calculation” from Mexicano scoring,
+          then you’d paste match results and it computes P automatically.
+        </div>
+      </details>
+    </div>
+  </div>
+</main>
+
+<script>
+  // -----------------------------
+  // Defaults (exactly as you defined)
+  // -----------------------------
+  const DEFAULT_STATE = {
+    tiers: {
+      "Tier 1": ["Rajesh", "Alvaro", "Aman", "Karan"],
+      "Tier 2A": ["KP", "Amit", "Lauren", "Kamal", "Andrew S", "Andy D", "Holger", "Sharad"],
+      "Tier 2B": ["Gavin", "Sunny", "Scott", "Andrew"],
+      "Tier 3": ["Audre", "Karolyn", "Mo", "Sven", "Christian", "James", "Kenny", "Harsh"]
+    },
+    // weeks: { [weekKey]: { roundsPlayed: number, results: { [name]: { status:"PLAYED"|"DNP", p?:number } } } }
+    weeks: {}
+  };
+
+  const LS_KEY = "mexicano_padel_state_v1";
+
+  function loadState(){
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if(!raw) return structuredClone(DEFAULT_STATE);
+      const parsed = JSON.parse(raw);
+      // basic shape guard
+      if(!parsed.tiers || !parsed.weeks) return structuredClone(DEFAULT_STATE);
+      return parsed;
+    } catch {
+      return structuredClone(DEFAULT_STATE);
+    }
+  }
+
+  function saveState(state){
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+  }
+
+  let state = loadState();
+
+  // -----------------------------
+  // Helpers
+  // -----------------------------
+  const tierWeight = (tier) => ({
+    "Tier 1": 4,
+    "Tier 2A": 3,
+    "Tier 2B": 2,
+    "Tier 3": 1
+  }[tier] ?? 1);
+
+  function normalizeName(name){
+    return name.trim().replace(/\s+/g, " ");
+  }
+
+  function allPlayers(){
+    const out = [];
+    for (const [t, arr] of Object.entries(state.tiers)){
+      for (const p of arr) out.push({ name:p, tier:t });
+    }
+    return out;
+  }
+
+  function findPlayerTier(name){
+    const n = normalizeName(name);
+    for (const [t, arr] of Object.entries(state.tiers)){
+      if(arr.map(normalizeName).includes(n)) return t;
+    }
+    return null;
+  }
+
+  function ensurePlayerKnown(name){
+    const n = normalizeName(name);
+    let t = findPlayerTier(n);
+    if(t) return t;
+    // Ask user to assign tier (required behavior)
+    const choice = prompt(`"${n}" is not on the player list.\nWhich tier? Type: Tier 1, Tier 2A, Tier 2B, or Tier 3`, "Tier 3");
+    const picked = (choice || "").trim();
+    const valid = ["Tier 1","Tier 2A","Tier 2B","Tier 3"];
+    const finalTier = valid.includes(picked) ? picked : "Tier 3";
+    state.tiers[finalTier].push(n);
+    saveState(state);
+    renderAll();
+    return finalTier;
+  }
+
+  function uniq(arr){
+    return Array.from(new Set(arr));
+  }
+
+  function fmtP(p){
+    if (typeof p !== "number" || Number.isNaN(p)) return "";
+    return p.toFixed(2);
+  }
+
+  function latestWeekKey(){
+    const keys = Object.keys(state.weeks);
+    if(keys.length === 0) return null;
+    // assume ISO-ish labels sort nicely; otherwise just use lexicographic
+    keys.sort();
+    return keys[keys.length - 1];
+  }
+
+  // -----------------------------
+  // UI render
+  // -----------------------------
+  function renderTiers(){
+    const el = document.getElementById("tiersView");
+    el.innerHTML = "";
+
+    const wrap = document.createElement("div");
+    wrap.className = "split";
+
+    const order = ["Tier 1","Tier 2A","Tier 2B","Tier 3"];
+    for (const tier of order){
+      const card = document.createElement("div");
+      card.className = "card";
+      card.style.background = "#0c1226";
+      card.style.borderRadius = "12px";
+      card.style.padding = "12px";
+
+      const title = document.createElement("div");
+      title.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;">
+        <div><strong>${tier}</strong> <span class="muted">(${state.tiers[tier].length})</span></div>
+        <span class="pill mono">w=${tierWeight(tier)}</span>
+      </div>`;
+      card.appendChild(title);
+
+      const list = document.createElement("div");
+      list.style.marginTop = "8px";
+      list.className = "muted";
+      list.innerHTML = state.tiers[tier]
+        .slice()
+        .sort((a,b)=>a.localeCompare(b))
+        .map(p => `• ${p}`).join("<br/>") || "<em>None</em>";
+      card.appendChild(list);
+
+      wrap.appendChild(card);
+    }
+    el.appendChild(wrap);
+  }
+
+  function renderWeekly(weekKey=null){
+    const out = document.getElementById("weeklyOut");
+    const wk = weekKey || latestWeekKey();
+    if(!wk){
+      out.innerHTML = `<div class="muted">No weeks saved yet. Add one above.</div>`;
+      return;
+    }
+    const data = state.weeks[wk];
+    if(!data){
+      out.innerHTML = `<div class="muted">Week not found.</div>`;
+      return;
+    }
+
+    // Build WP counts (weeks played, not DNP)
+    const wp = {};
+    for (const [k, wdata] of Object.entries(state.weeks)){
+      for (const [name, res] of Object.entries(wdata.results)){
+        if(res.status === "PLAYED"){
+          wp[name] = (wp[name] || 0) + 1;
+        }
+      }
+    }
+
+    // For this week, list all players who appear in results. (You can extend to auto-DNP everyone else if desired)
+    const rows = Object.entries(data.results).map(([name, res]) => {
+      const status = res.status;
+      const p = (status === "PLAYED") ? res.p : null;
+      return { name, status, p, wp: wp[name] || 0 };
+    });
+
+    // Sort: PLAYED first by P desc, then DNP
+    rows.sort((a,b)=>{
+      if(a.status !== b.status) return a.status === "PLAYED" ? -1 : 1;
+      if(a.status === "PLAYED" && b.status === "PLAYED") return (b.p ?? -999) - (a.p ?? -999);
+      return a.name.localeCompare(b.name);
+    });
+
+    const playedCount = rows.filter(r=>r.status==="PLAYED").length;
+
+    out.innerHTML = `
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <div><strong>Latest week:</strong> <span class="mono">${wk}</span></div>
+          <div class="muted">Rounds played: <span class="mono">${data.roundsPlayed ?? 0}</span> • PLAYED: <span class="mono">${playedCount}</span> • DNP: <span class="mono">${rows.length - playedCount}</span></div>
+        </div>
+      </div>
+      <div style="margin-top:10px; overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th>Status</th>
+              <th class="right">P (2dp)</th>
+              <th class="right">WP</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(r => `
+              <tr>
+                <td>${r.name}</td>
+                <td>${r.status === "DNP" ? `<span class="pill mono">DNP</span>` : `<span class="ok">PLAYED</span>`}</td>
+                <td class="right mono">${r.status === "PLAYED" ? fmtP(r.p) : ""}</td>
+                <td class="right mono">${r.wp}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderPairings(courts){
+    const out = document.getElementById("pairingOut");
+    if(!courts || courts.length === 0){
+      out.innerHTML = `<div class="muted">No pairings yet. Click “Generate Pairings”.</div>`;
+      return;
+    }
+
+    out.innerHTML = courts.map((c, i) => {
+      const t1 = c.team1.map(p=>p.name).join(" + ");
+      const t2 = c.team2.map(p=>p.name).join(" + ");
+      return `
+        <div class="card" style="background:#0c1226; margin-top:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div><strong>Court ${i+1}</strong></div>
+            <div class="pill mono">court strength: ${c.total.toFixed(1)}</div>
+          </div>
+          <div style="margin-top:8px;">
+            <div><span class="ok">Team A</span>: ${t1}</div>
+            <div><span class="warn">Team B</span>: ${t2}</div>
+          </div>
+          <div class="muted" style="margin-top:6px;">
+            ${c.players.map(p=>`${p.name} (${p.tier}, w=${p.w})`).join(" • ")}
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function renderAll(){
+    renderTiers();
+    renderWeekly();
+  }
+
+  // -----------------------------
+  // Pairing algorithm (heuristic)
+  // -----------------------------
+  function generateCourts(participantNames){
+    let players = [];
+
+    if(participantNames && participantNames.length){
+      for (const n of participantNames){
+        const tier = ensurePlayerKnown(n);
+        players.push({ name: normalizeName(n), tier, w: tierWeight(tier) });
+      }
+      // de-dupe
+      const map = new Map();
+      for (const p of players) map.set(p.name, p);
+      players = Array.from(map.values());
+    } else {
+      players = allPlayers().map(p => ({ ...p, w: tierWeight(p.tier) }));
+    }
+
+    // Need groups of 4
+    const N = players.length;
+    if(N < 4) return [];
+    const usable = players.slice(0, Math.floor(N/4)*4);
+
+    // Sort strongest to weakest
+    usable.sort((a,b)=> b.w - a.w || a.name.localeCompare(b.name));
+
+    // Distribute into courts to balance totals (greedy: snake draft)
+    const courts = [];
+    const C = usable.length / 4;
+    for(let i=0;i<C;i++) courts.push({ players:[], total:0 });
+
+    let dir = 1;
+    let idx = 0;
+    for(const p of usable){
+      courts[idx].players.push(p);
+      courts[idx].total += p.w;
+      idx += dir;
+      if(idx === C){ dir = -1; idx = C-1; }
+      if(idx < 0){ dir = 1; idx = 0; }
+    }
+
+    // Within each court, create teams: strongest+weakest vs middle+middle
+    const out = courts.map(c=>{
+      const ps = c.players.slice().sort((a,b)=> b.w - a.w || a.name.localeCompare(b.name));
+      const team1 = [ps[0], ps[3]];
+      const team2 = [ps[1], ps[2]];
+      return { ...c, team1, team2 };
+    });
+
+    // Sort courts by total strength descending (nice display)
+    out.sort((a,b)=> b.total - a.total);
+    return out;
+  }
+
+  // -----------------------------
+  // Events
+  // -----------------------------
+  document.getElementById("addPlayerBtn").addEventListener("click", ()=>{
+    const name = normalizeName(document.getElementById("playerName").value || "");
+    const tier = document.getElementById("tierSelect").value;
+    if(!name) return alert("Enter a player name.");
+
+    // remove from any tier
+    for(const t of Object.keys(state.tiers)){
+      state.tiers[t] = state.tiers[t].filter(p => normalizeName(p) !== name);
+    }
+    state.tiers[tier].push(name);
+    state.tiers[tier] = uniq(state.tiers[tier]);
+    saveState(state);
+    document.getElementById("playerName").value = "";
+    renderAll();
+  });
+
+  document.getElementById("resetBtn").addEventListener("click", ()=>{
+    if(!confirm("Reset players to the default tier list? (Weeks remain)")) return;
+    const weeksKeep = state.weeks;
+    state = structuredClone(DEFAULT_STATE);
+    state.weeks = weeksKeep;
+    saveState(state);
+    renderAll();
+  });
+
+  document.getElementById("wipeBtn").addEventListener("click", ()=>{
+    if(!confirm("Wipe ALL local data (players + weeks)?")) return;
+    localStorage.removeItem(LS_KEY);
+    state = structuredClone(DEFAULT_STATE);
+    renderAll();
+  });
+
+  document.getElementById("genPairBtn").addEventListener("click", ()=>{
+    const raw = document.getElementById("participants").value.trim();
+    const names = raw ? raw.split(",").map(s=>normalizeName(s)).filter(Boolean) : [];
+    const courts = generateCourts(names);
+    if(courts.length === 0){
+      document.getElementById("pairingOut").innerHTML = `<div class="muted">Need at least 4 participants.</div>`;
+      return;
+    }
+    renderPairings(courts);
+  });
+
+  document.getElementById("saveWeekBtn").addEventListener("click", ()=>{
+    const wk = (document.getElementById("weekKey").value || "").trim();
+    if(!wk) return alert("Enter a week label (e.g., 2026-02-02).");
+
+    const roundsPlayed = Number(document.getElementById("roundsPlayed").value || 0);
+
+    const lines = (document.getElementById("weekResults").value || "")
+      .split("\n")
+      .map(l=>l.trim())
+      .filter(Boolean);
+
+    const results = {};
+    for(const line of lines){
+      const parts = line.split(",");
+      if(parts.length < 2) continue;
+      const name = normalizeName(parts[0]);
+      const val = (parts.slice(1).join(",")).trim();
+
+      ensurePlayerKnown(name);
+
+      if(val.toUpperCase() === "DNP"){
+        results[name] = { status: "DNP" };
+      } else {
+        const p = Number(val);
+        if(Number.isNaN(p)) continue;
+        results[name] = { status: "PLAYED", p };
+      }
+    }
+
+    state.weeks[wk] = { roundsPlayed, results };
+    saveState(state);
+
+    renderWeekly(wk);
+    alert("Week saved.");
+  });
+
+  document.getElementById("latestWeekBtn").addEventListener("click", ()=>{
+    renderWeekly();
+  });
+
+  // init
+  renderAll();
+  renderPairings([]);
+</script>
+</body>
+</html>
